@@ -1,0 +1,5 @@
+{
+  "name": "Marketing Asset Generator",
+  "description": "An app to generate marketing assets from a product photo and a description using Gemini.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,5 @@
+This application is built entirely around the powerful image editing capabilities of the Gemini 2.5 Flash Image Preview model. Its core functionality hinges on the model's ability to process multimodal inputs—specifically, combining a user-uploaded product photo with a descriptive text prompt.
+
+For each of the seven asset types, the application sends the original image alongside a unique, detailed instruction. The model doesn't just understand the image; it uses it as a foundation to generate entirely new visual content. For instance, it creates a photorealistic lifestyle scene featuring the product or designs a complete advertising pamphlet incorporating it.
+
+This "image-in, image-out" workflow, where the model edits and reimagines a source image based on textual commands, is central to the app. It allows users to transform a single product photo into a diverse set of high-quality, context-aware marketing assets, demonstrating the model's advanced creative and generative power.
