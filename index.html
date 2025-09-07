@@ -22,6 +22,26 @@
 </head>
   <body>
     <div id="root"></div>
+    <script>
+      // This more robust script checks for an ACTIVE service worker.
+      // If a service worker is controlling the page, it's likely the cause
+      // of the file loading errors. We unregister it and reload the page.
+      // On the next load, the controller will be null, and this script won't
+      // run again, preventing a loop.
+      (async () => {
+        if (navigator.serviceWorker?.controller) {
+          try {
+            console.log('Active service worker detected. Unregistering to fix loading issues...');
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map(reg => reg.unregister()));
+            // Reload the page to ensure it's loaded without the service worker's interference.
+            window.location.reload();
+          } catch (err) {
+            console.error('Service Worker unregistration failed: ', err);
+          }
+        }
+      })();
+    </script>
     <script type="module" src="index.tsx"></script>
   </body>
 </html>

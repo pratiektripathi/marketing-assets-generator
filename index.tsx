@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Modality } from '@google/genai';
 import JSZip from 'jszip';
@@ -24,13 +24,45 @@ const fileToGenerativePart = async (file: File) => {
   };
 };
 
+const FallingBananas: React.FC = () => {
+  const bananas = useMemo(() => {
+    // Generate a memoized array of banana styles to prevent re-calculation on re-renders
+    return Array.from({ length: 30 }).map((_, i) => ({
+      id: i,
+      style: {
+        left: `${Math.random() * 100}vw`,
+        transform: `scale(${0.8 + Math.random() * 0.5})`, // for size variation
+        animationDuration: `${5 + Math.random() * 8}s`, // Slower and varied falling speed
+        animationDelay: `${Math.random() * 7}s`, // Staggered start times
+      },
+    }));
+  }, []);
+
+  return (
+    <div className="falling-bananas-container" aria-hidden="true">
+      {bananas.map(banana => (
+        <div key={banana.id} className="banana" style={banana.style}></div>
+      ))}
+    </div>
+  );
+};
+
+type AssetState = {
+  title: string;
+  url: string | null;
+  status: 'pending' | 'success' | 'error';
+  error?: string;
+};
+
 const App: React.FC = () => {
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
   const [prompt, setPrompt] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
-  const [result, setResult] = useState<{ title: string; url: string }[]>([]);
+  const [result, setResult] = useState<AssetState[]>([]);
+  const [generationStarted, setGenerationStarted] = useState<boolean>(false);
+  const isGenerationCancelled = useRef(false);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -65,15 +97,32 @@ const App: React.FC = () => {
       setError('Please provide both an image and a description.');
       return;
     }
-
+  
+    setGenerationStarted(true);
     setIsLoading(true);
     setError('');
     setResult([]);
-
+    isGenerationCancelled.current = false;
+  
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
       const imagePart = await fileToGenerativePart(image);
 
+      // --- New Step 1: Generate Avatar Description ---
+      let avatarDescription = '';
+      try {
+        const avatarGenPrompt = `Based on the following product and its key features: "${prompt}", describe a single, visually distinct and appealing brand avatar or mascot in one sentence. This avatar will be used in marketing images. Be specific about its appearance (e.g., age, gender, style for a person; species, color, expression for an animal or character). The description should be concise and ready to be used in an image generation prompt. For example, for 'A stylish, eco-friendly water bottle', a good description would be 'A young, athletic woman with a friendly smile, in her mid-20s, wearing modern activewear.' Do not add any preamble.`;
+        
+        const avatarResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: avatarGenPrompt,
+        });
+        avatarDescription = avatarResponse.text.trim();
+
+      } catch (err) {
+        console.warn('Could not generate avatar description, proceeding without avatar assets.', err);
+      }
+  
       const creativeAssets = [
         {
           title: 'Lifestyle Photo',
@@ -105,51 +154,98 @@ const App: React.FC = () => {
         },
       ];
 
-      const generationPromises = creativeAssets.map((asset) => {
-        const textPart = { text: asset.prompt };
-        const promise = ai.models.generateContent({
+      if (avatarDescription) {
+        const avatarAssets = [
+          {
+            title: 'Avatar with Product',
+            prompt: `Create a super high-resolution, photorealistic lifestyle photo. It should feature an avatar described as: "${avatarDescription}", happily using the product from the provided image, which is "${prompt}". The setting should be bright and contextually appropriate, reflecting the product's use case. Emphasize crisp details and professional lighting.`,
+          },
+          {
+            title: 'Avatar Showcase',
+            prompt: `Generate a dynamic, super high-resolution action shot. The avatar, described as: "${avatarDescription}", is enthusiastically showcasing a key feature of the product from the image ("${prompt}"). The image should focus on the interaction, capturing a moment of genuine use with extreme detail and clarity.`,
+          },
+          {
+            title: 'Avatar Testimonial Pose',
+            prompt: `Design a realistic, super high-resolution image perfect for a social media testimonial. It shows the avatar, described as: "${avatarDescription}", looking directly at the camera with a delighted expression while holding or presenting the product ("${prompt}"). The background should be clean and slightly blurred to make the avatar and product the main focus.`,
+          },
+          {
+            title: 'Avatar Unboxing Experience',
+            prompt: `Create a super high-resolution, photorealistic shot of the avatar, described as: "${avatarDescription}", with a look of excitement while unboxing the product ("${prompt}"). The packaging should be partially open, revealing the product inside. The setting should be a clean, well-lit space like a modern living room or studio.`,
+          },
+          {
+            title: 'Avatar in Context',
+            prompt: `Generate a super high-resolution, photorealistic image of the avatar, described as: "${avatarDescription}", using the product ("${prompt}") in its natural environment. For example, if it's a water bottle, show them on a hiking trail; if it's a tech gadget, in a modern office. The background should be scenic and relevant, enhancing the product's story.`,
+          },
+          {
+            title: 'Avatar Product Close-Up',
+            prompt: `Design a super high-resolution, detailed close-up shot focusing on the avatar's hands, described as belonging to: "${avatarDescription}", as they interact with a specific feature of the product ("${prompt}"). The image should emphasize the product's texture, materials, and design, conveying a sense of quality and usability.`,
+          },
+        ];
+        creativeAssets.push(...avatarAssets);
+      }
+
+      // Immediately set all assets to pending to show placeholders
+      setResult(
+        creativeAssets.map((asset) => ({
+          title: asset.title,
+          url: null,
+          status: 'pending',
+        }))
+      );
+  
+      const generationPromises = creativeAssets.map((asset) =>
+        ai.models.generateContent({
           model: 'gemini-2.5-flash-image-preview',
           contents: {
-            parts: [imagePart, textPart],
+            parts: [imagePart, { text: asset.prompt }],
           },
           config: {
             responseModalities: [Modality.IMAGE, Modality.TEXT],
           },
-        });
-        return { title: asset.title, promise };
-      });
-
-      // Update UI as each promise resolves to show results as they come in
-      generationPromises.forEach(({ title, promise }) => {
-        promise
-          .then((response) => {
-            if (response.candidates && response.candidates.length > 0) {
-              const imagePart = response.candidates[0].content.parts.find(
-                (part) => part.inlineData
-              );
-              if (imagePart?.inlineData) {
-                const imageUrl = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-                setResult((prev) => [...prev, { title, url: imageUrl }]);
-              }
-            }
-          })
-          .catch((err) => {
-            // Individual errors can be logged; the main error is handled by Promise.all
-            console.error(`Asset generation for "${title}" failed:`, err);
-          });
-      });
-
-      // Wait for all generations to complete to handle loading state and final error message
-      const responses = await Promise.all(generationPromises.map((p) => p.promise));
-
-      // Check if any images were successfully generated across all responses
-      const hasGeneratedImages = responses.some((response) =>
-        response.candidates?.[0]?.content.parts.some((part) => part.inlineData)
+        })
+        .then((response) => {
+          if (isGenerationCancelled.current) return;
+  
+          const imagePartResponse = response.candidates?.[0]?.content.parts.find(
+            (part) => part.inlineData
+          );
+  
+          if (imagePartResponse?.inlineData) {
+            const imageUrl = `data:${imagePartResponse.inlineData.mimeType};base64,${imagePartResponse.inlineData.data}`;
+            // Update the specific asset to success
+            setResult((prev) =>
+              prev.map((item) =>
+                item.title === asset.title
+                  ? { ...item, url: imageUrl, status: 'success' }
+                  : item
+              )
+            );
+          } else {
+            // Handle case where API returns success but no image data
+            throw new Error('No image data found in API response.');
+          }
+        })
+        .catch((err) => {
+          if (isGenerationCancelled.current) return;
+          console.error(`Asset generation for "${asset.title}" failed:`, err);
+          // Update the specific asset to error
+          setResult((prev) =>
+            prev.map((item) =>
+              item.title === asset.title
+                ? {
+                    ...item,
+                    status: 'error',
+                    error: err instanceof Error ? err.message : 'Generation failed',
+                  }
+                : item
+            )
+          );
+        })
       );
-
-      if (!hasGeneratedImages) {
-        setError('No images were generated. Please try a different prompt.');
-      }
+  
+      // Wait for all promises to settle before turning off the main loader
+      await Promise.allSettled(generationPromises);
+  
     } catch (err) {
       console.error(err);
       setError(
@@ -161,13 +257,14 @@ const App: React.FC = () => {
   }, [image, prompt]);
 
   const handleDownloadAll = async () => {
-    if (result.length === 0) return;
+    const successfulResults = result.filter(r => r.status === 'success' && r.url);
+    if (successfulResults.length === 0) return;
 
     const zip = new JSZip();
 
-    result.forEach(({ title, url }) => {
-      const fileName = `${title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-asset.png`;
-      const base64Data = url.split(',')[1];
+    successfulResults.forEach(({ title, url }) => {
+      const fileName = `${title!.toLowerCase().replace(/[^a-z0-9]/g, '-')}-asset.png`;
+      const base64Data = url!.split(',')[1];
       zip.file(fileName, base64Data, { base64: true });
     });
 
@@ -181,8 +278,27 @@ const App: React.FC = () => {
     URL.revokeObjectURL(link.href);
   };
 
+  const handleStop = () => {
+    isGenerationCancelled.current = true;
+    setIsLoading(false);
+  };
+  
+  const handleClear = () => {
+    setImage(null);
+    setImagePreview('');
+    setPrompt('');
+    setResult([]);
+    setError('');
+    setIsLoading(false);
+    setGenerationStarted(false);
+    if(isGenerationCancelled.current) {
+      isGenerationCancelled.current = false;
+    }
+  };
+
   return (
     <div className="container">
+      {isLoading && <FallingBananas />}
       <header>
         <h1>Marketing Asset Generator</h1>
         <p>Upload a product photo, describe your goal, and let AI create new assets.</p>
@@ -220,45 +336,89 @@ const App: React.FC = () => {
               />
             </div>
 
-            <button
-              className="btn"
-              onClick={generateAssets}
-              disabled={!image || !prompt || isLoading}
-            >
-              {isLoading ? 'Generating...' : 'Generate Assets'}
-            </button>
+            <div className="button-group">
+              {isLoading ? (
+                <button className="btn btn-danger" onClick={handleStop}>Stop</button>
+              ) : (
+                <>
+                  <button
+                    className="btn"
+                    onClick={generateAssets}
+                    disabled={!image || !prompt}
+                  >
+                    Generate Assets
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleClear}
+                    disabled={!image && !prompt && result.length === 0}
+                  >
+                    Clear
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="card results-section">
-          {isLoading && <div className="loader" aria-label="Loading content"></div>}
-          {error && <div className="error-message" role="alert">{error}</div>}
-          {result && result.length > 0 && (
-            <>
-              <div className="results-header">
-                <h2>Generated Assets</h2>
-                <button className="btn download-all-btn" onClick={handleDownloadAll}>
-                  Download All (.zip)
-                </button>
+        {generationStarted && (
+          <div className="card results-section">
+            {isLoading && result.length === 0 && (
+              <div className="initial-loader">
+                <div className="spinner"></div>
+                <p>Generating creative concepts...</p>
               </div>
-              <div className="result-content">
-                {result.map(({ title, url }, index) => (
-                  <div className="result-item" key={index}>
-                    <h3>{title}</h3>
-                    <img src={url} alt={`Generated marketing asset: ${title}`}/>
-                    <a 
-                      className="btn download-btn"
-                      href={url}
-                      download={`${title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-asset.png`}
-                    >
-                      Download Image
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+            )}
+            {error && <div className="error-message" role="alert">{error}</div>}
+            {result.length > 0 && (
+              <>
+                <div className="results-header">
+                  <h2>Generated Assets</h2>
+                  <button 
+                    className="btn download-all-btn" 
+                    onClick={handleDownloadAll}
+                    disabled={!result.some(r => r.status === 'success')}
+                  >
+                    Download All (.zip)
+                  </button>
+                </div>
+                <div className="result-content">
+                  {result.map((item, index) => (
+                    <div className="result-item" key={index}>
+                      <h3>{item.title}</h3>
+                      {item.status === 'pending' && (
+                        <div className="placeholder wireframe">
+                          <div className="skeleton skeleton-title"></div>
+                          <div className="skeleton skeleton-image"></div>
+                          <div className="skeleton skeleton-button"></div>
+                        </div>
+                      )}
+                      {item.status === 'success' && item.url && (
+                        <>
+                          <img src={item.url} alt={`Generated marketing asset: ${item.title}`}/>
+                          <a 
+                            className="btn download-btn"
+                            href={item.url}
+                            download={`${item.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-asset.png`}
+                          >
+                            Download Image
+                          </a>
+                        </>
+                      )}
+                      {item.status === 'error' && (
+                         <div className="placeholder error-placeholder">
+                            <p role="img" aria-label="Warning">⚠️</p>
+                            <span>Failed to generate</span>
+                            {item.error && <small>{item.error}</small>}
+                         </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
