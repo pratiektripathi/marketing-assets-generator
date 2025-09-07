@@ -546,7 +546,24 @@ const App: React.FC = () => {
               </label>
               {imagePreview && (
                 <div className="image-preview">
-                  <img src={imagePreview} alt="Selected product" />
+                  <div className="image-preview-container">
+                    <img src={imagePreview} alt="Selected product" />
+                    <button
+                      className="delete-image-btn"
+                      onClick={() => {
+                        setImage(null);
+                        setImagePreview('');
+                        setResult([]);
+                        setError('');
+                        // Clear the file input
+                        const fileInput = document.getElementById('image-upload') as HTMLInputElement;
+                        if (fileInput) fileInput.value = '';
+                      }}
+                      title="Remove image"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
